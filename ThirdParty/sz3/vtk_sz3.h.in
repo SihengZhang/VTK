@@ -1,0 +1,15 @@
+// SPDX-FileCopyrightText: Copyright (c) Ken Martin, Will Schroeder, Bill Lorensen
+// SPDX-License-Identifier: BSD-3-Clause
+#ifndef vtk_sz3_h
+#define vtk_sz3_h
+
+/* Use the sz3 library configured for VTK. */
+#cmakedefine01 VTK_MODULE_USE_EXTERNAL_vtksz3
+
+#if VTK_MODULE_USE_EXTERNAL_vtksz3
+# include <SZ3/api/sz.hpp>
+#else
+# include <vtksz3/include/SZ3/api/sz.hpp>
+#endif
+
+#endif

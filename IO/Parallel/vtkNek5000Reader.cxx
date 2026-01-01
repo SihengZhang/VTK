@@ -24,6 +24,9 @@
 #include "vtkUnsignedCharArray.h"
 #include "vtkUnstructuredGrid.h"
 
+// enable sz3 by using module VTK::sz3
+#include "vtk_sz3.h"
+
 #include <vtksys/SystemTools.hxx>
 
 #include <iostream>

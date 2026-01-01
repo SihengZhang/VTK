@@ -1,0 +1,7 @@
+NAME
+  VTK::sz3
+LIBRARY_NAME
+  vtksz3
+TEST_DEPENDS
+  VTK::TestingCore
+THIRD_PARTY

@@ -21,6 +21,7 @@ DEPENDS
   VTK::IOImage
   VTK::IOLegacy
   VTK::jsoncpp
+  VTK::sz3
 PRIVATE_DEPENDS
   VTK::CommonMisc
   VTK::CommonSystem
