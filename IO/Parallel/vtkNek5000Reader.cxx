@@ -311,6 +311,8 @@ bool vtkNek5000Reader::GetAllTimesAndVariableNames(vtkInformationVector* outputV
 
   double timeRange[2];
   timeRange[0] = *this->TimeSteps.begin();
+  // potential bug fix: initialize timeRange[1] - Siheng Zhang Jun 5, 2024
+  timeRange[1] = this->TimeSteps.back();
 
   vtkDebugMacro(<< "vtkNek5000Reader::GetAllTimes: timeRange[0] = " << timeRange[0]
                 << ", timeRange[1] = " << timeRange[1]);
