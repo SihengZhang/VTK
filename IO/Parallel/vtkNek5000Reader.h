@@ -140,6 +140,11 @@ protected:
   void updateVariableStatus();
   void partitionAndReadMesh();
   void readData(char* dfName);
+
+  // Compressed format support
+  void readCompressedFormatMetadata(std::ifstream& dfPtr);
+  void readCompressedMesh(std::ifstream& dfPtr);
+  void readCompressedData(char* dfName);
   // copy the data from nek5000 to pv
   void updateVtuData(vtkUnstructuredGrid* pv_ugrid); //, vtkUnstructuredGrid* pv_boundary_ugrid);
   void addCellsToContinuumMesh();
@@ -187,6 +192,17 @@ protected:
   double TimeValue;
   int TimeStepRange[2];
   bool swapEndian;
+
+  // Compression support for #stdc format
+  bool isCompressedFormat;       // true if #stdc format, false if #std
+  int numWriterRanks;            // np from file (writer rank count)
+  int numFieldsInFile;           // nfields from header
+  int* fieldIds;                 // field ID mapping (X=1, Y=2, Z=3, U=4, V=5, W=6, P=7, T=8)
+  int* compressionFlags;         // per-field: 0=raw, 1=SZ3
+  int* compressionParams;        // per-field compression parameters
+  int64_t* fieldOffsets;         // byte offset to each field block
+  int* elementCumulativeSum;     // elements per writer rank (cumulative)
+  int* elementGlobalIds;         // global element ID mapping
 
   std::vector<double> TimeSteps;
   //  int UseProjection;

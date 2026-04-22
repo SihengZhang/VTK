@@ -5,6 +5,11 @@ if (TARGET VTK::ParallelMPI)
     TestPOpenFOAMReaderGlobalFaceZone.cxx,NO_VALID
     TestPOpenFOAMReaderLagrangianSerial.cxx,NO_VALID
     TestPOpenFOAMReaderLagrangianUncollated.cxx,NO_VALID
+    TestNek5000CompressedReaderMPI.cxx,NO_VALID
+    TestNek5000CompressedScalability.cxx,NO_VALID
+    TestNek5000CompressedVsUncompressed.cxx,NO_VALID
+    TestNek5000CompressedMultiTimestep.cxx,NO_VALID
+    TestNek5000BothFormats.cxx,NO_VALID
     )
   vtk_test_cxx_executable(vtkIOParallelCxxTests-MPI tests)
 endif()
@@ -15,5 +20,6 @@ vtk_add_test_cxx(vtkIOParallelCxxTests tests
   TestPOpenFOAMReaderLagrangianSerial.cxx,NO_VALID
   TestPOpenFOAMReaderLagrangianUncollated.cxx,NO_VALID
   TestBigEndianPlot3D.cxx,NO_VALID
+  TestNek5000CompressedReader.cxx,NO_VALID
   )
 vtk_test_cxx_executable(vtkIOParallelCxxTests tests)

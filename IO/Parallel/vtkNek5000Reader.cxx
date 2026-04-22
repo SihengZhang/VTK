@@ -29,10 +29,14 @@
 
 #include <vtksys/SystemTools.hxx>
 
+#include <cmath>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <new>
+#include <utility>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <algorithm>
@@ -181,6 +185,17 @@ vtkNek5000Reader::vtkNek5000Reader()
   this->SpectralElementIds = 0;
   this->CleanGrid = 0;
 
+  // Compression support initialization
+  this->isCompressedFormat = false;
+  this->numWriterRanks = 0;
+  this->numFieldsInFile = 0;
+  this->fieldIds = nullptr;
+  this->compressionFlags = nullptr;
+  this->compressionParams = nullptr;
+  this->fieldOffsets = nullptr;
+  this->elementCumulativeSum = nullptr;
+  this->elementGlobalIds = nullptr;
+
   this->PointDataArraySelection = vtkDataArraySelection::New();
 
   this->myList = new nek5KList();
@@ -219,6 +234,14 @@ vtkNek5000Reader::~vtkNek5000Reader()
   this->PointDataArraySelection->Delete();
 
   delete[] this->myBlockPositions;
+
+  // Cleanup compression-related arrays
+  delete[] this->fieldIds;
+  delete[] this->compressionFlags;
+  delete[] this->compressionParams;
+  delete[] this->fieldOffsets;
+  delete[] this->elementCumulativeSum;
+  delete[] this->elementGlobalIds;
 }
 
 //----------------------------------------------------------------------------
@@ -265,7 +288,18 @@ bool vtkNek5000Reader::GetAllTimesAndVariableNames(vtkInformationVector* outputV
       return false;
     }
 
-    dfPtr >> dummy >> dummy >> dummy >> dummy >> dummy >> dummy >> dummy;
+    // Read format tag to detect compressed vs uncompressed
+    // Header layout:
+    //   Uncompressed: #std  precision dim1 dim2 dim3 elemCount elemCount time cycle ...
+    //   Compressed:   #stdc version precision dim1 dim2 dim3 elemCount elemCount time cycle ...
+    // Compressed format has extra version token after #stdc
+    dfPtr >> dummy;  // format tag (#std or #stdc)
+    bool isCompressed = (strcmp(dummy, "#stdc") == 0);
+    if (isCompressed)
+    {
+      dfPtr >> dummy;  // skip version number for compressed format
+    }
+    dfPtr >> dummy >> dummy >> dummy >> dummy >> dummy >> dummy;  // precision, dims, elemCounts
     dfPtr >> t >> c >> dummy;
     vtkDebugMacro(<< "vtkNek5000Reader::GetAllTimesAndVariableNames:  time = " << t
                   << " cycle =  " << c);
@@ -303,6 +337,31 @@ bool vtkNek5000Reader::GetAllTimesAndVariableNames(vtkInformationVector* outputV
                   << "] = " << this->timestep_has_mesh[i]);
 
   } // for (int i=0; i<(this->NumberOfTimeSteps); i++)
+
+  // Check if all time values are identical (e.g., all zeros in some compressed files)
+  // If so, use file indices as synthetic unique time values to enable multi-timestep reading
+  bool allTimesIdentical = true;
+  if (this->NumberOfTimeSteps > 1)
+  {
+    double firstTime = this->TimeSteps[0];
+    for (int i = 1; i < this->NumberOfTimeSteps; i++)
+    {
+      if (std::abs(this->TimeSteps[i] - firstTime) > 1e-15)
+      {
+        allTimesIdentical = false;
+        break;
+      }
+    }
+    if (allTimesIdentical)
+    {
+      vtkWarningMacro(<< "All timestep time values are identical (" << this->TimeSteps[0]
+                      << "). Using file indices as synthetic time values.");
+      for (int i = 0; i < this->NumberOfTimeSteps; i++)
+      {
+        this->TimeSteps[i] = static_cast<double>(i);
+      }
+    }
+  }
 
   this->GetVariableNamesFromData(firstTags);
 
@@ -739,35 +798,57 @@ void vtkNek5000Reader::partitionAndReadMesh()
   }
 
   dfPtr >> tag;
-  if (tag != "#std")
+  if (tag == "#stdc")
   {
-    std::cerr << "Error reading the header.  Expected it to start with #std " << dfName
-              << std::endl;
-    exit(1);
+    this->isCompressedFormat = true;
+    int version;
+    dfPtr >> version;
+    vtkDebugMacro(<< "Detected compressed format (#stdc) version " << version);
+  }
+  else if (tag == "#std")
+  {
+    this->isCompressedFormat = false;
+  }
+  else
+  {
+    vtkErrorMacro("Error reading header. Expected #std or #stdc but got: " << tag);
+    return;
   }
   dfPtr >> this->precision;
   dfPtr >> this->blockDims[0];
   dfPtr >> this->blockDims[1];
   dfPtr >> this->blockDims[2];
-  dfPtr >> buf2; // blocks per file
+  dfPtr >> buf2;
   dfPtr >> this->numBlocks;
 
   this->totalBlockSize = this->blockDims[0] * this->blockDims[1] * this->blockDims[2];
-  if (this->blockDims[2] > 1)
+  this->MeshIs3D = (this->blockDims[2] > 1);
+  vtkDebugMacro(<< (this->MeshIs3D ? "3D" : "2D") << " mesh: element size "
+    << this->blockDims[0] << "x" << this->blockDims[1] << "x" << this->blockDims[2]
+    << "=" << this->totalBlockSize);
+
+  if (this->isCompressedFormat)
   {
-    this->MeshIs3D = true;
-    std::cout << "3D-Mesh found";
+    char nfieldsStr[4] = {0};
+    char writerRanksStr[11] = {0};
+
+    dfPtr.seekg(98, std::ios_base::beg);
+    dfPtr.read(nfieldsStr, 3);
+    this->numFieldsInFile = std::atoi(nfieldsStr);
+
+    dfPtr.seekg(118, std::ios_base::beg);
+    dfPtr.read(writerRanksStr, 10);
+    this->numWriterRanks = std::atoi(writerRanksStr);
+
+    vtkDebugMacro(<< "Compressed format: nfields=" << this->numFieldsInFile
+      << " writerRanks=" << this->numWriterRanks);
   }
-  else
-  {
-    this->MeshIs3D = false;
-    std::cout << "2D-Mesh found";
-  }
-  std::cout << ", spectral element of size = " << this->blockDims[0] << "*" << this->blockDims[1]
-            << "*" << this->blockDims[2] << "=" << this->totalBlockSize << std::endl;
+
+  // Test value at offset 132 for both formats
+  long testValueOffset = 132;
 
   float test;
-  dfPtr.seekg(132, std::ios_base::beg);
+  dfPtr.seekg(testValueOffset, std::ios_base::beg);
   dfPtr.read((char*)(&test), 4);
 
   // see if we need to swap endian
@@ -800,11 +881,25 @@ void vtkNek5000Reader::partitionAndReadMesh()
   this->myNumBlocks = this->proc_numBlocks[my_rank];
   this->myBlockIDs = new int[this->myNumBlocks];
 
-  // read the ids of all of the blocks in the file
-  dfPtr.seekg(136, std::ios_base::beg);
-  dfPtr.read((char*)tmpBlocks, this->numBlocks * sizeof(int));
-  if (this->swapEndian)
-    ByteSwap32(tmpBlocks, this->numBlocks);
+  if (this->isCompressedFormat)
+  {
+    // Read compressed format metadata arrays
+    this->readCompressedFormatMetadata(dfPtr);
+
+    // For compressed format, element IDs are in elementGlobalIds array
+    for (i = 0; i < this->numBlocks; i++)
+    {
+      tmpBlocks[i] = this->elementGlobalIds[i];
+    }
+  }
+  else
+  {
+    // read the ids of all of the blocks in the file (uncompressed format)
+    dfPtr.seekg(136, std::ios_base::beg);
+    dfPtr.read((char*)tmpBlocks, this->numBlocks * sizeof(int));
+    if (this->swapEndian)
+      ByteSwap32(tmpBlocks, this->numBlocks);
+  }
 
   // add the block locations to a map, so that we can easily find their position based on their id
   for (i = 0; i < this->numBlocks; i++)
@@ -890,95 +985,103 @@ void vtkNek5000Reader::partitionAndReadMesh()
   delete[] map_elements;
 
   // now read the coordinates for all of my blocks
-  if (nullptr == this->meshCoords)
+  if (this->isCompressedFormat)
   {
-    vtkDebugMacro(<< ": partitionAndReadMesh:  ALLOCATE meshCoords[" << this->myNumBlocks << "*"
-                  << this->totalBlockSize << "*" << 3 << "]");
-    this->meshCoords = new float[this->myNumBlocks * this->totalBlockSize * 3];
+    // For compressed format, read mesh using readCompressedMesh
+    this->readCompressedMesh(dfPtr);
   }
-
-  long total_header_size = 136 + (this->numBlocks * 4);
-  long read_location, offset1;
-
-  if (this->precision == 4)
+  else
   {
-    float* coordPtr = this->meshCoords;
-    int read_size;
-    if (this->MeshIs3D)
+    // Uncompressed format - read mesh coordinates directly
+    if (nullptr == this->meshCoords)
     {
-      read_size = this->totalBlockSize * 3;
+      vtkDebugMacro(<< ": partitionAndReadMesh:  ALLOCATE meshCoords[" << this->myNumBlocks << "*"
+                    << this->totalBlockSize << "*" << 3 << "]");
+      this->meshCoords = new float[this->myNumBlocks * this->totalBlockSize * 3];
+    }
+
+    long total_header_size = 136 + (this->numBlocks * 4);
+    long read_location, offset1;
+
+    if (this->precision == 4)
+    {
+      float* coordPtr = this->meshCoords;
+      int read_size;
+      if (this->MeshIs3D)
+      {
+        read_size = this->totalBlockSize * 3;
+        for (i = 0; i < this->myNumBlocks; i++)
+        {
+          // header + (index_of_this_block * size_of_a_block * variable_in_block (x,y,z) * precision)
+          offset1 = this->myBlockPositions[i];
+          offset1 *= this->totalBlockSize;
+          offset1 *= 3;
+          offset1 *= this->precision;
+          read_location = total_header_size + offset1;
+          dfPtr.seekg(read_location, std::ios_base::beg);
+          if (!dfPtr)
+            std::cerr << __LINE__ << ": seekg error at read_location = " << read_location
+                      << std::endl;
+          dfPtr.read((char*)coordPtr, read_size * sizeof(float));
+          if (!dfPtr)
+            std::cerr << __LINE__ << ": read error\n";
+          coordPtr += read_size;
+        }
+      }
+      else
+      { // 2D case
+        read_size = this->totalBlockSize * 2;
+        for (i = 0; i < this->myNumBlocks; i++)
+        {
+          // header + (index_of_this_block * size_of_a_block * variable_in_block (x,y,z) * precision)
+          offset1 = this->myBlockPositions[i];
+          offset1 *= this->totalBlockSize;
+          offset1 *= 2;
+          offset1 *= this->precision;
+          read_location = total_header_size + offset1;
+          dfPtr.seekg(read_location, std::ios_base::beg);
+          if (!dfPtr)
+            std::cerr << __LINE__ << ": seekg error at read_location = " << read_location
+                      << std::endl;
+          dfPtr.read((char*)coordPtr, read_size * sizeof(float));
+
+          if (!dfPtr)
+            std::cerr << __LINE__ << ": read error\n";
+          // now set the Z component to 0.0
+          std::fill_n(&coordPtr[read_size], this->totalBlockSize, 0);
+          coordPtr += (this->totalBlockSize * 3);
+        }
+      }
+
+      if (this->swapEndian)
+        ByteSwap32(this->meshCoords, this->myNumBlocks * this->totalBlockSize * 3);
+    }
+    else // precision == 8
+    {
+      float* coordPtr = this->meshCoords;
+      double* tmpDblPts = new double[this->totalBlockSize * 3];
+      int read_size = this->totalBlockSize * 3;
       for (i = 0; i < this->myNumBlocks; i++)
       {
         // header + (index_of_this_block * size_of_a_block * variable_in_block (x,y,z) * precision)
-        offset1 = this->myBlockPositions[i];
-        offset1 *= this->totalBlockSize;
-        offset1 *= 3;
-        offset1 *= this->precision;
-        read_location = total_header_size + offset1;
+        read_location = total_header_size +
+          int64_t(this->myBlockPositions[i] * this->totalBlockSize * 3 * this->precision);
         dfPtr.seekg(read_location, std::ios_base::beg);
         if (!dfPtr)
-          std::cerr << __LINE__ << ": seekg error at read_location = " << read_location
-                    << std::endl;
-        dfPtr.read((char*)coordPtr, read_size * sizeof(float));
-        if (!dfPtr)
-          std::cerr << __LINE__ << ": read error\n";
-        coordPtr += read_size;
+          std::cerr << __LINE__ << ": seekg error at read_location = " << read_location << std::endl;
+        dfPtr.read((char*)tmpDblPts, read_size * sizeof(double));
+        for (auto ind = 0; ind < read_size; ind++)
+        {
+          *coordPtr = (float)tmpDblPts[ind];
+          coordPtr++;
+        }
       }
+      if (this->swapEndian)
+        ByteSwap64(this->meshCoords, this->myNumBlocks * this->totalBlockSize * 3);
+      delete[] tmpDblPts;
     }
-    else
-    { // 2D case
-      read_size = this->totalBlockSize * 2;
-      for (i = 0; i < this->myNumBlocks; i++)
-      {
-        // header + (index_of_this_block * size_of_a_block * variable_in_block (x,y,z) * precision)
-        offset1 = this->myBlockPositions[i];
-        offset1 *= this->totalBlockSize;
-        offset1 *= 2;
-        offset1 *= this->precision;
-        read_location = total_header_size + offset1;
-        dfPtr.seekg(read_location, std::ios_base::beg);
-        if (!dfPtr)
-          std::cerr << __LINE__ << ": seekg error at read_location = " << read_location
-                    << std::endl;
-        dfPtr.read((char*)coordPtr, read_size * sizeof(float));
-
-        if (!dfPtr)
-          std::cerr << __LINE__ << ": read error\n";
-        // now set the Z component to 0.0
-        std::fill_n(&coordPtr[read_size], this->totalBlockSize, 0);
-        coordPtr += (this->totalBlockSize * 3);
-      }
-    }
-
-    if (this->swapEndian)
-      ByteSwap32(this->meshCoords, this->myNumBlocks * this->totalBlockSize * 3);
   }
-  else // precision == 8
-  {
-    float* coordPtr = this->meshCoords;
-    double* tmpDblPts = new double[this->totalBlockSize * 3];
-    int read_size = this->totalBlockSize * 3;
-    for (i = 0; i < this->myNumBlocks; i++)
-    {
-      // header + (index_of_this_block * size_of_a_block * variable_in_block (x,y,z) * precision)
-      read_location = total_header_size +
-        int64_t(this->myBlockPositions[i] * this->totalBlockSize * 3 * this->precision);
-      // fseek(dfPtr, read_location, SEEK_SET);
-      // fread(tmpDblPts, sizeof(double), read_size, dfPtr);
-      dfPtr.seekg(read_location, std::ios_base::beg);
-      if (!dfPtr)
-        std::cerr << __LINE__ << ": seekg error at read_location = " << read_location << std::endl;
-      dfPtr.read((char*)tmpDblPts, read_size * sizeof(double));
-      for (auto ind = 0; ind < read_size; ind++)
-      {
-        *coordPtr = (float)tmpDblPts[ind];
-        coordPtr++;
-      }
-    }
-    if (this->swapEndian)
-      ByteSwap64(this->meshCoords, this->myNumBlocks * this->totalBlockSize * 3);
-    delete[] tmpDblPts;
-  }
+
   delete[] this->myBlockIDs;
   dfPtr.close();
 } // void vtkNek5000Reader::partitionAndReadMesh()
@@ -1289,7 +1392,14 @@ int vtkNek5000Reader::RequestData(vtkInformation* request,
                 << " Now reading data from file: " << dfName
                 << " this->requested_step: " << this->requested_step);
 
-  this->readData(dfName);
+  if (this->isCompressedFormat)
+  {
+    this->readCompressedData(dfName);
+  }
+  else
+  {
+    this->readData(dfName);
+  }
   this->curObj->setDataFilename(dfName);
 
   this->I_HAVE_DATA = true;
@@ -1743,6 +1853,517 @@ void vtkNek5000Reader::copyContinuumData(vtkUnstructuredGrid* pv_ugrid)
   }
 } // vtkNek5000Reader::copyContinuumData()
 
+//----------------------------------------------------------------------------
+// Read metadata arrays for compressed (#stdc) format
+void vtkNek5000Reader::readCompressedFormatMetadata(std::ifstream& dfPtr)
+{
+  // Offset after header and test value for compressed format
+  // Header is 132 bytes + 4 bytes test value = 136 bytes
+  long off_fid = 136;
+
+  int nfields = this->numFieldsInFile;
+  int np = this->numWriterRanks;
+  int cntg = this->numBlocks; // total elements
+
+  // Calculate offsets for each metadata array
+  long off_flag = off_fid + 4 * nfields;
+  long off_param = off_flag + 4 * nfields;
+  long off_ecs = off_param + 4 * nfields;
+  long off_emap = off_ecs + 4 * np;
+  long off_fieldoffs = off_emap + 4 * cntg;
+
+  // Allocate arrays
+  this->fieldIds = new int[nfields];
+  this->compressionFlags = new int[nfields];
+  this->compressionParams = new int[nfields];
+  this->elementCumulativeSum = new int[np];
+  this->elementGlobalIds = new int[cntg];
+  this->fieldOffsets = new int64_t[nfields];
+
+  // Read Field_id[nfields]
+  dfPtr.seekg(off_fid, std::ios_base::beg);
+  dfPtr.read((char*)this->fieldIds, nfields * sizeof(int));
+  if (this->swapEndian)
+    ByteSwap32(this->fieldIds, nfields);
+
+  // Read Compression_flag[nfields]
+  dfPtr.seekg(off_flag, std::ios_base::beg);
+  dfPtr.read((char*)this->compressionFlags, nfields * sizeof(int));
+  if (this->swapEndian)
+    ByteSwap32(this->compressionFlags, nfields);
+
+  // Read Compression_parameter[nfields]
+  dfPtr.seekg(off_param, std::ios_base::beg);
+  dfPtr.read((char*)this->compressionParams, nfields * sizeof(int));
+  if (this->swapEndian)
+    ByteSwap32(this->compressionParams, nfields);
+
+  // Read Element_Cumulative_Sum[np]
+  dfPtr.seekg(off_ecs, std::ios_base::beg);
+  dfPtr.read((char*)this->elementCumulativeSum, np * sizeof(int));
+  if (this->swapEndian)
+    ByteSwap32(this->elementCumulativeSum, np);
+
+  // Read Element_global_id[cntg]
+  dfPtr.seekg(off_emap, std::ios_base::beg);
+  dfPtr.read((char*)this->elementGlobalIds, cntg * sizeof(int));
+  if (this->swapEndian)
+    ByteSwap32(this->elementGlobalIds, cntg);
+
+  // Read Field_offset[nfields] (int64)
+  dfPtr.seekg(off_fieldoffs, std::ios_base::beg);
+  dfPtr.read((char*)this->fieldOffsets, nfields * sizeof(int64_t));
+  if (this->swapEndian)
+    ByteSwap64(this->fieldOffsets, nfields);
+
+  vtkDebugMacro(<< "Compressed metadata: " << nfields << " fields, "
+    << np << " writer ranks, " << cntg << " global elements");
+}
+
+//----------------------------------------------------------------------------
+// Read compressed field data using SZ3 decompression
+void vtkNek5000Reader::readCompressedData(char* dfName)
+{
+  std::ifstream dfPtr;
+  dfPtr.open(dfName, std::ifstream::binary);
+
+  if (!dfPtr.is_open())
+  {
+    std::cerr << "Error opening compressed datafile: " << dfName << std::endl;
+    return;
+  }
+
+  int my_rank = 0;
+  int num_ranks = 1;
+  vtkMultiProcessController* ctrl = vtkMultiProcessController::GetGlobalController();
+  if (ctrl != nullptr)
+  {
+    my_rank = ctrl->GetLocalProcessId();
+    num_ranks = ctrl->GetNumberOfProcesses();
+  }
+
+  int np = this->numWriterRanks;
+  int nfields = this->numFieldsInFile;
+  int pointsPerElement = this->totalBlockSize;
+
+  // Determine which writer ranks this reader rank will process (same as mesh)
+  int writerRanksPerReader = (np + num_ranks - 1) / num_ranks;
+  int myFirstWriterRank = my_rank * writerRanksPerReader;
+  int myLastWriterRank = std::min((my_rank + 1) * writerRanksPerReader - 1, np - 1);
+
+  if (myFirstWriterRank > np - 1)
+  {
+    myFirstWriterRank = np;
+    myLastWriterRank = np - 1;
+  }
+
+  // Allocate per-rank offset and length arrays
+  std::vector<int64_t> rankOffsets(np);
+  std::vector<int64_t> rankLengths(np);
+
+  // For each variable requested
+  for (int varIdx = 0; varIdx < this->num_vars; varIdx++)
+  {
+    if (!this->GetPointArrayStatus(varIdx) || this->dataArray[varIdx] == nullptr)
+      continue;
+
+    const char* varName = this->var_names[varIdx];
+
+    if (strcmp(varName, "Velocity Magnitude") == 0)
+      continue;
+
+    // Determine which field(s) to read based on field IDs
+    std::vector<std::pair<int, int>> fieldsToRead; // (fieldId, fieldIndex)
+
+    if (strcmp(varName, "Velocity") == 0)
+    {
+      for (int f = 0; f < nfields; f++)
+      {
+        if (this->fieldIds[f] >= 4 && this->fieldIds[f] <= 6)
+          fieldsToRead.push_back({this->fieldIds[f], f});
+      }
+      std::sort(fieldsToRead.begin(), fieldsToRead.end());
+    }
+    else if (strcmp(varName, "Pressure") == 0)
+    {
+      for (int f = 0; f < nfields; f++)
+      {
+        if (this->fieldIds[f] == 7)
+        {
+          fieldsToRead.push_back({7, f});
+          break;
+        }
+      }
+    }
+    else if (strcmp(varName, "Temperature") == 0)
+    {
+      for (int f = 0; f < nfields; f++)
+      {
+        if (this->fieldIds[f] == 8)
+        {
+          fieldsToRead.push_back({8, f});
+          break;
+        }
+      }
+    }
+
+    // Allocate temporary buffer for field data
+    size_t myTotalPoints = static_cast<size_t>(this->myNumBlocks) * pointsPerElement;
+    std::vector<float> fieldData(myTotalPoints);
+
+    int componentIdx = 0;
+    for (const auto& fieldPair : fieldsToRead)
+    {
+      int fieldIdx = fieldPair.second;
+      int64_t fieldOffset = this->fieldOffsets[fieldIdx];
+      int isCompressed = this->compressionFlags[fieldIdx];
+
+      dfPtr.seekg(fieldOffset, std::ios_base::beg);
+      dfPtr.read(reinterpret_cast<char*>(rankOffsets.data()), np * sizeof(int64_t));
+      dfPtr.read(reinterpret_cast<char*>(rankLengths.data()), np * sizeof(int64_t));
+
+      if (this->swapEndian)
+      {
+        ByteSwap64(rankOffsets.data(), np);
+        ByteSwap64(rankLengths.data(), np);
+      }
+
+      int64_t dataRegionStart = fieldOffset + 16 * np;
+
+      // Read data from assigned writer ranks
+      size_t destOffset = 0;
+      for (int wr = myFirstWriterRank; wr <= myLastWriterRank; wr++)
+      {
+        int elementsForRank;
+        if (wr == 0)
+          elementsForRank = this->elementCumulativeSum[0];
+        else
+          elementsForRank = this->elementCumulativeSum[wr] - this->elementCumulativeSum[wr - 1];
+
+        int64_t blobOffset = dataRegionStart + rankOffsets[wr];
+        int64_t blobLength = rankLengths[wr];
+        int pointsForRank = elementsForRank * pointsPerElement;
+
+        if (blobLength == 0)
+        {
+          destOffset += pointsForRank;
+          continue;
+        }
+
+        std::vector<char> compressedBlob(blobLength);
+        dfPtr.seekg(blobOffset, std::ios_base::beg);
+        dfPtr.read(compressedBlob.data(), blobLength);
+
+        if (isCompressed == 1)
+        {
+          SZ3::Config conf;
+          float* decData = nullptr;
+
+          try
+          {
+            SZ_decompress<float>(conf, compressedBlob.data(), blobLength, decData);
+            if (decData != nullptr)
+            {
+              size_t copyCount = std::min(static_cast<size_t>(pointsForRank),
+                                          static_cast<size_t>(conf.num));
+              memcpy(fieldData.data() + destOffset, decData, copyCount * sizeof(float));
+              delete[] decData;
+            }
+          }
+          catch (const std::exception& e)
+          {
+            std::cerr << "SZ3 error field " << fieldIdx << " wr " << wr << ": " << e.what() << std::endl;
+          }
+        }
+        else
+        {
+          if (this->precision == 4)
+          {
+            memcpy(fieldData.data() + destOffset, compressedBlob.data(), pointsForRank * sizeof(float));
+            if (this->swapEndian)
+              ByteSwap32(fieldData.data() + destOffset, pointsForRank);
+          }
+          else
+          {
+            double* dblPtr = reinterpret_cast<double*>(compressedBlob.data());
+            if (this->swapEndian)
+              ByteSwap64(dblPtr, pointsForRank);
+            for (int k = 0; k < pointsForRank; k++)
+              fieldData[destOffset + k] = static_cast<float>(dblPtr[k]);
+          }
+        }
+        destOffset += pointsForRank;
+      }
+
+      // Copy to dataArray with proper layout
+      if (strcmp(varName, "Velocity") == 0)
+      {
+        // Velocity: interleaved (U,V,W) per element
+        for (int e = 0; e < this->myNumBlocks; e++)
+        {
+          for (int k = 0; k < pointsPerElement; k++)
+          {
+            size_t srcIdx = static_cast<size_t>(e) * pointsPerElement + k;
+            size_t dstIdx = static_cast<size_t>(e) * pointsPerElement * 3 +
+                           componentIdx * pointsPerElement + k;
+            this->dataArray[varIdx][dstIdx] = fieldData[srcIdx];
+          }
+        }
+      }
+      else
+      {
+        // Scalar: direct copy
+        memcpy(this->dataArray[varIdx], fieldData.data(), myTotalPoints * sizeof(float));
+      }
+      componentIdx++;
+    }
+
+    // Compute velocity magnitude if needed
+    if (strcmp(varName, "Velocity") == 0)
+    {
+      for (int vi = 0; vi < this->num_vars; vi++)
+      {
+        if (strcmp(this->var_names[vi], "Velocity Magnitude") == 0 &&
+            this->GetPointArrayStatus(vi) && this->dataArray[vi] != nullptr)
+        {
+          for (int e = 0; e < this->myNumBlocks; e++)
+          {
+            for (int k = 0; k < pointsPerElement; k++)
+            {
+              size_t velIdx = static_cast<size_t>(e) * pointsPerElement * 3;
+              float vx = this->dataArray[varIdx][velIdx + k];
+              float vy = this->dataArray[varIdx][velIdx + pointsPerElement + k];
+              float vz = this->dataArray[varIdx][velIdx + 2 * pointsPerElement + k];
+              size_t magIdx = static_cast<size_t>(e) * pointsPerElement + k;
+              this->dataArray[vi][magIdx] = std::sqrt(vx * vx + vy * vy + vz * vz);
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  dfPtr.close();
+}
+
+//----------------------------------------------------------------------------
+// Read compressed mesh coordinates
+void vtkNek5000Reader::readCompressedMesh(std::ifstream& dfPtr)
+{
+  int my_rank = 0;
+  int num_ranks = 1;
+  vtkMultiProcessController* ctrl = vtkMultiProcessController::GetGlobalController();
+  if (ctrl != nullptr)
+  {
+    my_rank = ctrl->GetLocalProcessId();
+    num_ranks = ctrl->GetNumberOfProcesses();
+  }
+
+  int np = this->numWriterRanks;
+  int nfields = this->numFieldsInFile;
+  int pointsPerElement = this->totalBlockSize;
+
+  // Determine which writer ranks this reader rank will process
+  // Distribute writer ranks evenly across reader ranks
+  int writerRanksPerReader = (np + num_ranks - 1) / num_ranks;
+  int myFirstWriterRank = my_rank * writerRanksPerReader;
+  int myLastWriterRank = std::min((my_rank + 1) * writerRanksPerReader - 1, np - 1);
+
+  if (myFirstWriterRank > np - 1)
+  {
+    myFirstWriterRank = np;
+    myLastWriterRank = np - 1;
+  }
+
+  // Calculate how many elements this reader rank will handle
+  int myElementStart = (myFirstWriterRank > 0) ? this->elementCumulativeSum[myFirstWriterRank - 1] : 0;
+  int myElementEnd = (myLastWriterRank >= 0 && myLastWriterRank < np) ?
+                      this->elementCumulativeSum[myLastWriterRank] : 0;
+  int myTotalElements = myElementEnd - myElementStart;
+
+  // Override myNumBlocks for compressed format
+  this->myNumBlocks = myTotalElements;
+
+  vtkDebugMacro(<< "readCompressedMesh: rank " << my_rank << "/" << num_ranks
+    << " processing writer ranks " << myFirstWriterRank << "-" << myLastWriterRank
+    << " (" << myTotalElements << " elements)");
+
+  // Allocate mesh coordinates array for this reader's elements
+  if (nullptr == this->meshCoords)
+  {
+    size_t allocSize = static_cast<size_t>(myTotalElements) *
+                       static_cast<size_t>(pointsPerElement) * 3;
+    if (allocSize > 0)
+    {
+      this->meshCoords = new float[allocSize];
+    }
+  }
+
+  if (myTotalElements == 0)
+  {
+    return;
+  }
+
+  // Allocate per-rank offset and length arrays
+  std::vector<int64_t> rankOffsets(np);
+  std::vector<int64_t> rankLengths(np);
+
+  // Find X, Y, Z fields (IDs 1, 2, 3) and sort by field ID
+  std::vector<std::pair<int, int>> coordFields;
+  for (int f = 0; f < nfields; f++)
+  {
+    if (this->fieldIds[f] >= 1 && this->fieldIds[f] <= 3)
+      coordFields.push_back({this->fieldIds[f], f});
+  }
+  std::sort(coordFields.begin(), coordFields.end());
+
+  if (coordFields.size() < static_cast<size_t>(this->MeshIs3D ? 3 : 2))
+  {
+    std::cerr << "Not enough coordinate fields in compressed file" << std::endl;
+    return;
+  }
+
+  // Allocate temporary buffers for coordinates of this rank's elements
+  size_t myTotalPoints = static_cast<size_t>(myTotalElements) * pointsPerElement;
+  std::vector<float> allX(myTotalPoints);
+  std::vector<float> allY(myTotalPoints);
+  std::vector<float> allZ(this->MeshIs3D ? myTotalPoints : 0);
+
+  // Read each coordinate field
+  for (size_t coordIdx = 0; coordIdx < coordFields.size(); coordIdx++)
+  {
+    int fieldIdx = coordFields[coordIdx].second;
+    int64_t fieldOffset = this->fieldOffsets[fieldIdx];
+    int isCompressed = this->compressionFlags[fieldIdx];
+
+    // Read offsets[np] and lengths[np] for this field block
+    dfPtr.seekg(fieldOffset, std::ios_base::beg);
+    dfPtr.read(reinterpret_cast<char*>(rankOffsets.data()), np * sizeof(int64_t));
+    dfPtr.read(reinterpret_cast<char*>(rankLengths.data()), np * sizeof(int64_t));
+
+    if (this->swapEndian)
+    {
+      ByteSwap64(rankOffsets.data(), np);
+      ByteSwap64(rankLengths.data(), np);
+    }
+
+    int64_t dataRegionStart = fieldOffset + 16 * np;
+
+    float* destBuffer = nullptr;
+    if (coordIdx == 0) destBuffer = allX.data();
+    else if (coordIdx == 1) destBuffer = allY.data();
+    else if (coordIdx == 2) destBuffer = allZ.data();
+
+    // Read and decompress data only from writer ranks assigned to this reader
+    size_t destOffset = 0;
+    for (int wr = myFirstWriterRank; wr <= myLastWriterRank; wr++)
+    {
+      int elementsForRank;
+      if (wr == 0)
+        elementsForRank = this->elementCumulativeSum[0];
+      else
+        elementsForRank = this->elementCumulativeSum[wr] - this->elementCumulativeSum[wr - 1];
+
+      int64_t blobOffset = dataRegionStart + rankOffsets[wr];
+      int64_t blobLength = rankLengths[wr];
+      int pointsForRank = elementsForRank * pointsPerElement;
+
+      if (blobLength == 0)
+      {
+        destOffset += pointsForRank;
+        continue;
+      }
+
+      std::vector<char> compressedBlob(blobLength);
+      dfPtr.seekg(blobOffset, std::ios_base::beg);
+      dfPtr.read(compressedBlob.data(), blobLength);
+
+      if (isCompressed == 1)
+      {
+        SZ3::Config conf;
+        float* decData = nullptr;
+
+        try
+        {
+          SZ_decompress<float>(conf, compressedBlob.data(), blobLength, decData);
+          if (decData != nullptr)
+          {
+            size_t copyCount = std::min(static_cast<size_t>(pointsForRank),
+                                        static_cast<size_t>(conf.num));
+            memcpy(destBuffer + destOffset, decData, copyCount * sizeof(float));
+            delete[] decData;
+          }
+        }
+        catch (const std::exception& e)
+        {
+          std::cerr << "SZ3 decompression error for coord " << coordIdx
+                    << " writerRank " << wr << ": " << e.what() << std::endl;
+        }
+      }
+      else
+      {
+        if (this->precision == 4)
+        {
+          memcpy(destBuffer + destOffset, compressedBlob.data(), pointsForRank * sizeof(float));
+          if (this->swapEndian)
+            ByteSwap32(destBuffer + destOffset, pointsForRank);
+        }
+        else
+        {
+          double* dblPtr = reinterpret_cast<double*>(compressedBlob.data());
+          if (this->swapEndian)
+            ByteSwap64(dblPtr, pointsForRank);
+          for (int k = 0; k < pointsForRank; k++)
+            destBuffer[destOffset + k] = static_cast<float>(dblPtr[k]);
+        }
+      }
+      destOffset += pointsForRank;
+    }
+  }
+
+  // Rearrange from per-field layout to interleaved layout
+  // For compressed format, elements are ordered sequentially for this reader's writer ranks
+  size_t srcIdx = 0;
+  for (int wr = myFirstWriterRank; wr <= myLastWriterRank; wr++)
+  {
+    int elementsForRank;
+    if (wr == 0)
+      elementsForRank = this->elementCumulativeSum[0];
+    else
+      elementsForRank = this->elementCumulativeSum[wr] - this->elementCumulativeSum[wr - 1];
+
+    for (int e = 0; e < elementsForRank; e++)
+    {
+      size_t localElemIdx = srcIdx;
+      size_t meshOffset = localElemIdx * pointsPerElement * 3;
+      size_t srcPointOffset = srcIdx * pointsPerElement;
+
+      memcpy(this->meshCoords + meshOffset,
+             allX.data() + srcPointOffset,
+             pointsPerElement * sizeof(float));
+      memcpy(this->meshCoords + meshOffset + pointsPerElement,
+             allY.data() + srcPointOffset,
+             pointsPerElement * sizeof(float));
+      if (this->MeshIs3D)
+      {
+        memcpy(this->meshCoords + meshOffset + 2 * pointsPerElement,
+               allZ.data() + srcPointOffset,
+               pointsPerElement * sizeof(float));
+      }
+      else
+      {
+        std::fill_n(this->meshCoords + meshOffset + 2 * pointsPerElement,
+                    pointsPerElement, 0.0f);
+      }
+      srcIdx++;
+    }
+  }
+
+  vtkDebugMacro(<< "readCompressedMesh complete: " << srcIdx << " elements");
+}
+
+//----------------------------------------------------------------------------
 // see if the current object is missing data that was requested
 // return true if it is, otherwise false
 bool vtkNek5000Reader::isObjectMissingData()
