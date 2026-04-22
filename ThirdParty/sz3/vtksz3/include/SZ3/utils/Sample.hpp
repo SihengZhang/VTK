@@ -1,9 +1,12 @@
 #ifndef SZ3_SAMPLE_HPP
 #define SZ3_SAMPLE_HPP
 
+#include "SZ3/def.hpp"
+#include <vector>
+
 namespace SZ3 {
 template <class T, uint N>
-inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std::vector<size_t>> &starts,
+inline void profiling_block(T* data, std::vector<size_t>& dims, std::vector<std::vector<size_t>>& starts,
                             size_t block_size, double abseb, size_t stride = 4) {
     assert(dims.size() == N);
     if (stride == 0) stride = block_size;
@@ -20,10 +23,10 @@ inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std:
                         size_t start_idx = i * dimyzw + j * dimzw + k * dimw + l;
                         T min = data[start_idx];
                         T max = data[start_idx];
-                        for (int ii = 0; ii <= block_size; ii += stride) {
-                            for (int jj = 0; jj <= block_size; jj += stride) {
-                                for (int kk = 0; kk <= block_size; kk += stride) {
-                                    for (int ll = 0; ll <= block_size; ll += stride) {
+                        for (size_t ii = 0; ii <= block_size; ii += stride) {
+                            for (size_t jj = 0; jj <= block_size; jj += stride) {
+                                for (size_t kk = 0; kk <= block_size; kk += stride) {
+                                    for (size_t ll = 0; ll <= block_size; ll += stride) {
                                         size_t cur_idx = start_idx + ii * dimyzw + jj * dimzw + kk * dimw + ll;
                                         T cur_value = data[cur_idx];
                                         if (cur_value < min)
@@ -53,9 +56,9 @@ inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std:
                     size_t start_idx = i * dimyz + j * dimz + k;
                     T min = data[start_idx];
                     T max = data[start_idx];
-                    for (int ii = 0; ii <= block_size; ii += stride) {
-                        for (int jj = 0; jj <= block_size; jj += stride) {
-                            for (int kk = 0; kk <= block_size; kk += stride) {
+                    for (size_t ii = 0; ii <= block_size; ii += stride) {
+                        for (size_t jj = 0; jj <= block_size; jj += stride) {
+                            for (size_t kk = 0; kk <= block_size; kk += stride) {
                                 size_t cur_idx = start_idx + ii * dimyz + jj * dimz + kk;
                                 T cur_value = data[cur_idx];
                                 if (cur_value < min)
@@ -82,8 +85,8 @@ inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std:
                 size_t start_idx = i * dimy + j;
                 T min = data[start_idx];
                 T max = data[start_idx];
-                for (int ii = 0; ii <= block_size; ii += stride) {
-                    for (int jj = 0; jj <= block_size; jj += stride) {
+                for (size_t ii = 0; ii <= block_size; ii += stride) {
+                    for (size_t jj = 0; jj <= block_size; jj += stride) {
                         size_t cur_idx = start_idx + ii * dimy + jj;
                         T cur_value = data[cur_idx];
                         if (cur_value < min)
@@ -107,7 +110,7 @@ inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std:
             size_t start_idx = i;
             T min = data[start_idx];
             T max = data[start_idx];
-            for (int ii = 0; ii <= block_size; ii += stride) {
+            for (size_t ii = 0; ii <= block_size; ii += stride) {
                 size_t cur_idx = start_idx + ii;
                 T cur_value = data[cur_idx];
                 if (cur_value < min)
@@ -124,8 +127,8 @@ inline void profiling_block(T *data, std::vector<size_t> &dims, std::vector<std:
 }
 
 template <class T, uint N>
-inline void sample_blocks(T *data, std::vector<T> &sampling_data, std::vector<size_t> &dims,
-                          std::vector<size_t> &starts, size_t block_size) {
+inline void sample_blocks(T* data, std::vector<T>& sampling_data, std::vector<size_t>& dims,
+                          std::vector<size_t>& starts, size_t block_size) {
     assert(dims.size() == N);
     assert(starts.size() == N);
     if constexpr (N == 4) {
@@ -196,24 +199,24 @@ inline void sample_blocks(T *data, std::vector<T> &sampling_data, std::vector<si
 }
 
 template <class T, uint N>
-void sampleBlocks(T *data, std::vector<size_t> &dims, size_t sampleBlockSize,
-                  std::vector<std::vector<T>> &sampled_blocks, double sample_rate, int profiling,
-                  std::vector<std::vector<size_t>> &starts, int var_first = 0) {
-    for (int i = 0; i < N; i++) {
+void sampleBlocks(T* data, std::vector<size_t>& dims, size_t sampleBlockSize,
+                  std::vector<std::vector<T>>& sampled_blocks, double sample_rate, int profiling,
+                  std::vector<std::vector<size_t>>& starts, int var_first = 0) {
+    for (uint i = 0; i < N; i++) {
         if (dims[i] < sampleBlockSize) {
             return;
         }
     }
-    for (int i = 0; i < sampled_blocks.size(); i++) {
+    for (uint i = 0; i < sampled_blocks.size(); i++) {
         std::vector<T>().swap(sampled_blocks[i]);
     }
     std::vector<std::vector<T>>().swap(sampled_blocks);
-    for (int i = 0; i < sampled_blocks.size(); i++) {
+    for (uint i = 0; i < sampled_blocks.size(); i++) {
         std::vector<T>().swap(sampled_blocks[i]);
     }
     std::vector<std::vector<T>>().swap(sampled_blocks);
     size_t totalblock_num = 1;
-    for (int i = 0; i < N; i++) {
+    for (uint i = 0; i < N; i++) {
         totalblock_num *= static_cast<int>((dims[i] - 1) / sampleBlockSize);
     }
     size_t idx = 0;
@@ -284,6 +287,6 @@ void sampleBlocks(T *data, std::vector<size_t> &dims, size_t sampleBlockSize,
         }
     }
 }
-}  // namespace SZ3
+} // namespace SZ3
 
 #endif

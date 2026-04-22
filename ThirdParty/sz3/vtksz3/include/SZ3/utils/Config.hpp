@@ -1,6 +1,13 @@
-//
-// Created by Kai Zhao on 4/28/20.
-//
+/**
+ * @file Config.hpp
+ * @brief This file defines the configuration class and related utilities for SZ3.
+ *
+ * @note Do not delete any existing fields for backward compatibility.
+ *       These fields are critical for ensuring that serialized configurations
+ *       from older versions of SZ3 remain compatible with newer versions.
+ *       Removing or altering fields could break deserialization or cause
+ *       unexpected behavior in applications relying on SZ3.
+ */
 
 #ifndef SZ3_Config_HPP
 #define SZ3_Config_HPP
@@ -30,14 +37,50 @@
 
 namespace SZ3 {
 
+/**
+ * @enum EB
+ * @brief Enumeration for error bound modes.
+ *
+ * - EB_ABS: Absolute error bound. Limits the (de)compression errors to be within an absolute error. For example,
+ * absErrorBound=0.0001 means the decompressed value must be in [V-0.0001,V+0.0001], where V is the original true value.
+ * - EB_REL: Relative error bound ratio. Limits the (de)compression errors by considering the global data value range
+ * size (max_value - min_value). For example, relErrorBound=0.01 means the error bound is 0.01 * (max - min).
+ * - EB_PSNR: Peak Signal-to-Noise Ratio error bound. Expected PSNR. Only valid when ErrorBoundMode = PSNR.
+ * - EB_L2NORM: L2 norm error bound. Expected L2 norm error: sqrt((x1-x1')^2 + (x2-x2')^2 + ... + (xN-xN')^2)
+ * - EB_ABS_AND_REL: Combined absolute and relative error bound. Both absolute and relative bounds must be satisfied.
+ * - EB_ABS_OR_REL: Either absolute or relative error bound. Either the absolute or relative bound must be satisfied
+ * (whichever is stricter).
+ */
 enum EB { EB_ABS, EB_REL, EB_PSNR, EB_L2NORM, EB_ABS_AND_REL, EB_ABS_OR_REL };
-enum ALGO { ALGO_LORENZO_REG, ALGO_INTERP_LORENZO, ALGO_INTERP, ALGO_NOPRED, ALGO_LOSSLESS };
-enum INTERP_ALGO { INTERP_ALGO_LINEAR, INTERP_ALGO_CUBIC };  //, INTERP_ALGO_CUBIC_NATURAL};
+
+/**
+ * @enum ALGO
+ * @brief Enumeration for compression algorithms.
+ *
+ * - ALGO_LORENZO_REG: SZ2 algorithm (Lorenzo with regression).
+ * - ALGO_INTERP_LORENZO: the default SZ3 algorithm (Interpolation with Lorenzo, with tuning).
+ * - ALGO_INTERP: Interpolation-only (without tuning).
+ * - ALGO_NOPRED: No prediction.
+ * - ALGO_LOSSLESS: Lossless compression.
+ * - ALGO_BIOMD: data compression algorithm for biology molecular data.
+ * - ALGO_BIOMDXTC: The XTC data compression algorithm in GROMACS for biology molecular data.
+ */
+enum ALGO { ALGO_LORENZO_REG, ALGO_INTERP_LORENZO, ALGO_INTERP, ALGO_NOPRED, ALGO_LOSSLESS, ALGO_BIOMD, ALGO_BIOMDXTC };
+
+/**
+ * @enum INTERP_ALGO
+ * @brief Enumeration for interpolation algorithms.
+ *
+ * - INTERP_ALGO_LINEAR: Linear interpolation.
+ * - INTERP_ALGO_CUBIC: Cubic interpolation.
+ */
+enum INTERP_ALGO { INTERP_ALGO_LINEAR, INTERP_ALGO_CUBIC };
 
 const std::map<std::string, ALGO> ALGO_MAP = {
     {"ALGO_LORENZO_REG", ALGO_LORENZO_REG}, {"ALGO_INTERP_LORENZO", ALGO_INTERP_LORENZO},
     {"ALGO_INTERP", ALGO_INTERP},           {"ALGO_NOPRED", ALGO_NOPRED},
-    {"ALGO_LOSSLESS", ALGO_LOSSLESS},
+    {"ALGO_LOSSLESS", ALGO_LOSSLESS},       {"ALGO_BIOMD", ALGO_BIOMD},
+    {"ALGO_BIOMDXTC", ALGO_BIOMDXTC},
 };
 
 const std::map<std::string, EB> EB_MAP = {
@@ -54,16 +97,16 @@ const std::map<std::string, INTERP_ALGO> INTERP_ALGO_MAP = {
     {"INTERP_ALGO_CUBIC", INTERP_ALGO_CUBIC},
 };
 
-ALWAYS_INLINE std::string to_lower(const std::string &s) {
+ALWAYS_INLINE std::string to_lower(const std::string& s) {
     std::string out = s;
     std::transform(out.begin(), out.end(), out.begin(), ::tolower);
     return out;
 }
 
 template <typename EnumType>
-ALWAYS_INLINE void match_enum(const std::string &input, const std::map<std::string, EnumType> &table, uint8_t &out) {
+ALWAYS_INLINE void match_enum(const std::string& input, const std::map<std::string, EnumType>& table, uint8_t& out) {
     std::string input_lc = to_lower(input);
-    for (const auto &[key, val] : table) {
+    for (const auto& [key, val] : table) {
         if (to_lower(key) == input_lc) {
             out = static_cast<int>(val);
         }
@@ -71,8 +114,8 @@ ALWAYS_INLINE void match_enum(const std::string &input, const std::map<std::stri
 }
 
 template <typename EnumType>
-ALWAYS_INLINE std::string enum_to_string(EnumType value, const std::map<std::string, EnumType> &forward_map) {
-    for (const auto &[str, val] : forward_map) {
+ALWAYS_INLINE std::string enum_to_string(EnumType value, const std::map<std::string, EnumType>& forward_map) {
+    for (const auto& [str, val] : forward_map) {
         if (val == value) {
             return str;
         }
@@ -80,14 +123,40 @@ ALWAYS_INLINE std::string enum_to_string(EnumType value, const std::map<std::str
     return "";
 }
 
+/**
+ * @class Config
+ * @brief Configuration class for SZ3.
+ *
+ * The Config class stores various parameters and settings used by SZ3, such as:
+ * - Dimensions of the data.
+ * - Compression algorithm and error bound settings.
+ * - Module-specific parameters like interpolation settings.
+ *
+ * It provides methods to load/save configurations from/to INI files, serialize/deserialize configurations,
+ * and estimate the size of the configuration.
+ */
 class Config {
    public:
+    /**
+     * @brief Constructor to initialize the configuration with dimensions.
+     *
+     * @tparam Dims Variadic template for dimension arguments.
+     * @param args Dimensions of the data.
+     */
     template <class... Dims>
     Config(Dims... args) {
         dims = std::vector<size_t>{static_cast<size_t>(std::forward<Dims>(args))...};
         setDims(dims.begin(), dims.end());
     }
 
+    /**
+     * @brief Set the dimensions of the data.
+     *
+     * @tparam Iter Iterator type for the dimension range.
+     * @param begin Iterator to the beginning of the dimensions.
+     * @param end Iterator to the end of the dimensions.
+     * @return Total number of elements in the data.
+     */
     template <class Iter>
     size_t setDims(Iter begin, Iter end) {
         auto dims_ = std::vector<size_t>(begin, end);
@@ -107,7 +176,13 @@ class Config {
         return num;
     }
 
-    void loadcfg(const std::string &ini_file_path) {
+    /**
+     * @brief Load configuration from an INI file.
+     *
+     * @param ini_file_path Path to the INI file.
+     * @throws std::runtime_error If the file cannot be opened.
+     */
+    void loadcfg(const std::string& ini_file_path) {
         std::ifstream file(ini_file_path);
         if (!file.is_open()) {
             throw std::runtime_error("Failed to open INI file: " + ini_file_path);
@@ -117,18 +192,23 @@ class Config {
         load_ini(buffer.str());
     }
 
-    void load_ini(const std::string &ini_content) {
+    /**
+     * @brief Load configuration from an INI content string.
+     *
+     * @param ini_content Content of the INI file as a string.
+     */
+    void load_ini(const std::string& ini_content) {
         std::istringstream ss(ini_content);
         std::string line, section;
 
-        auto trim = [](std::string &s) {
+        auto trim = [](std::string& s) {
             s.erase(0, s.find_first_not_of(" \t\r\n"));
             s.erase(s.find_last_not_of(" \t\r\n") + 1);
         };
 
-        auto eq = [&](const std::string &a, const std::string &b) { return to_lower(a) == to_lower(b); };
+        auto eq = [&](const std::string& a, const std::string& b) { return to_lower(a) == to_lower(b); };
 
-        auto parse_bool = [&](const std::string &s) {
+        auto parse_bool = [&](const std::string& s) {
             auto ls = to_lower(s);
             return ls == "true" || ls == "1" || ls == "yes" || ls == "on";
         };
@@ -191,6 +271,11 @@ class Config {
         }
     }
 
+    /**
+     * @brief Save the current configuration to an INI format string.
+     *
+     * @return INI format string representing the current configuration.
+     */
     std::string save_ini() const {
         std::ostringstream ss;
 
@@ -218,10 +303,16 @@ class Config {
         return ss.str();
     }
 
-    size_t save(unsigned char *&c) const {
+    /**
+     * @brief Serialize the configuration to a byte array.
+     * @note some fields are saved/loaded in specific modules, not here.
+     * @param c Pointer to the byte array.
+     * @return Size of the serialized configuration.
+     */
+    size_t save(unsigned char*& c) const {
         auto c0 = c;
-        write(sz3MagicNumber, c);
-        write(sz3DataVer, c);
+        c += sizeof(uchar);  // reserve space for conf size
+
         write(N, c);
         // write(dims.data(), dims.size(), c);
         auto bitWidth = vector_bit_width(dims);
@@ -257,28 +348,22 @@ class Config {
         write(blockSize, c);
         write(predDim, c);
 
-        // printf("%lu\n", c - c0);
-        return c - c0;
+        auto confSize = static_cast<uchar>(c - c0);
+        write(confSize, c0);  // write conf size at reserved space
+        return confSize;
     }
 
-    void load(const unsigned char *&c) {
-        // auto c0 = c;
-        read(sz3MagicNumber, c);
-        if (sz3MagicNumber != SZ3_MAGIC_NUMBER) {
-            throw std::invalid_argument("magic number mismatch, the input data is not compressed by SZ3");
-        }
-        read(sz3DataVer, c);
-        if (versionStr(sz3DataVer) != SZ3_DATA_VER) {
-            std::stringstream ss;
-            printf("program v%s , program-data %s , input data v%s\n", SZ3_VER, SZ3_DATA_VER,
-                   versionStr(sz3DataVer).data());
-            ss << "Please use SZ3 v" << versionStr(sz3DataVer) << " to decompress the data" << std::endl;
-            std::cerr << ss.str();
-            throw std::invalid_argument(ss.str());
-        }
+    /**
+     * @brief Deserialize the configuration from a byte array.
+     *
+     * @param c Pointer to the byte array.
+     */
+    void load(const unsigned char*& c) {
+        uchar confSize = 0;
+        read(confSize, c);
+        auto c1 = c + confSize;
 
         read(N, c);
-
         uint8_t bitWidth;
         read(bitWidth, c);
         dims = bytes2vector<size_t>(c, bitWidth, N);
@@ -304,29 +389,32 @@ class Config {
             read(relErrorBound, c);
         }
 
-        uint8_t boolvals;
-        read(boolvals, c);
-        lorenzo = (boolvals >> 7) & 1;
-        lorenzo2 = (boolvals >> 6) & 1;
-        regression = (boolvals >> 5) & 1;
-        regression2 = (boolvals >> 4) & 1;
-        openmp = (boolvals >> 3) & 1;
-
-        read(dataType, c);
-        read(quantbinCnt, c);
-        read(blockSize, c);
-        read(predDim, c);
-
-        // print();
-        // printf("%d\n", c - c0);
-        // if (c - c0 > size_est()) {
-        //     throw std::invalid_argument("Config loaded size is larger than estimated size");
-        // } else {
-        //     // for padding
-        //     c = c0 + size_est();
-        // }
+        if (c < c1) {
+            uint8_t boolvals;
+            read(boolvals, c);
+            lorenzo = (boolvals >> 7) & 1;
+            lorenzo2 = (boolvals >> 6) & 1;
+            regression = (boolvals >> 5) & 1;
+            regression2 = (boolvals >> 4) & 1;
+            openmp = (boolvals >> 3) & 1;
+        }
+        if (c < c1) {
+            read(dataType, c);
+        }
+        if (c < c1) {
+            read(quantbinCnt, c);
+        }
+        if (c < c1) {
+            read(blockSize, c);
+        }
+        if (c < c1) {
+            read(predDim, c);
+        }
     }
 
+    /**
+     * @brief Print the current configuration.
+     */
     void print() {
         // printf("===================== Begin SZ3 Configuration =====================\n");
         printf("\nsz3MagicNumber = %u\n", sz3MagicNumber);
@@ -339,42 +427,55 @@ class Config {
         std::cout << save_ini();
     }
 
+    /**
+     * @brief Estimate the size of the serialized configuration.
+     *
+     * @return Estimated size in bytes.
+     */
     size_t size_est() const {
         std::vector<uchar> buffer(sizeof(Config) + 1024);
         auto buffer_pos = buffer.data();
-        return save(buffer_pos) ;
+        return save(buffer_pos);
     }
 
-    uint32_t sz3MagicNumber = SZ3_MAGIC_NUMBER;
-    uint32_t sz3DataVer = versionInt(SZ3_DATA_VER);
-    char N = 0;
-    std::vector<size_t> dims;
-    size_t num = 0;
-    uint8_t cmprAlgo = ALGO_INTERP_LORENZO;
-    uint8_t errorBoundMode = EB_ABS;
-    double absErrorBound = 1e-3;
-    double relErrorBound = 0.0;
-    double psnrErrorBound = 0.0;
-    double l2normErrorBound = 0.0;
-    bool lorenzo = true;
-    bool lorenzo2 = false;
-    bool regression = true;
-    bool regression2 = false;
-    bool openmp = false;
-    int quantbinCnt = 65536;
-    int blockSize = 0;
-    uint8_t predDim = 0;          // not used now
-    uint8_t dataType = SZ_FLOAT;  // dataType is only used in HDF5 filter
+    uint32_t sz3MagicNumber = SZ3_MAGIC_NUMBER;      ///< SZ3 magic number for identification
+    uint32_t sz3DataVer = versionInt(SZ3_DATA_VER);  ///< SZ3 data version
+
+    char N = 0;                ///< Number of dimensions
+    std::vector<size_t> dims;  ///< Dimensions of the data
+    size_t num = 0;            ///< Total number of data points
 
     /**
-     * The following parameters are only used by specific modules.
-     * They are saved and loaded in their module implementation, not in Config.
+     * @brief Global settings for compression.
+     * These settings are generally applicable for all users.
      */
-    uint8_t interpAlgo = INTERP_ALGO_CUBIC;
-    uint8_t interpDirection = 0;
-    int interpAnchorStride = -1;  // -1: using dynamic default setting
-    double interpAlpha = 1.25;    // level-wise eb reduction rate
-    double interpBeta = 2.0;      // maximum eb reduction rate
+    uint8_t cmprAlgo = ALGO_INTERP_LORENZO;  ///< Compression algorithm
+    uint8_t errorBoundMode = EB_ABS;         ///< Error bound mode
+    double absErrorBound = 1e-3;             ///< Absolute error bound
+    double relErrorBound = 0.0;              ///< Relative error bound
+    double psnrErrorBound = 0.0;             ///< PSNR error bound
+    double l2normErrorBound = 0.0;           ///< L2 norm error bound
+    bool openmp = false;                     ///< Use OpenMP for parallel processing
+
+    /**
+     * @brief Algorithm-specific settings.
+     * @note These are for advanced users or automatic tuning.
+     * @note Newly added settings should be saved/loaded in specific modules, not here.
+     */
+    int quantbinCnt = 65536;                 ///< Maximum number of quantization intervals
+    int blockSize = 0;                       ///< Block size for processing
+    uint8_t predDim = 0;                     ///< Prediction dimension (currently unused)
+    uint8_t dataType = SZ_FLOAT;             ///< Data type (used in HDF5 filter)
+    bool lorenzo = true;                     ///< Enable 1st order Lorenzo
+    bool lorenzo2 = false;                   ///< Enable 2nd order Lorenzo
+    bool regression = true;                  ///< Enable 1st order regression
+    bool regression2 = false;                ///< Enable 2nd order regression
+    uint8_t interpAlgo = INTERP_ALGO_CUBIC;  ///< Interpolation algorithm. Saved/loaded in InterpolationDecomposition.
+    uint8_t interpDirection = 0;             ///< Interpolation direction. Saved/loaded in InterpolationDecomposition.
+    int interpAnchorStride =
+        -1;  ///< Interpolation anchor stride (-1 for dynamic). Saved/loaded in InterpolationDecomposition.
+    double interpAlpha = 1.25;  ///< Interpolation eb tuning parameter. Saved/loaded in InterpolationDecomposition.
+    double interpBeta = 2.0;    ///< Interpolation eb tuning parameter. Saved/loaded in InterpolationDecomposition.
 };
 
 }  // namespace SZ3

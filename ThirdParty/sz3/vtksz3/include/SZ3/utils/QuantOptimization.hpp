@@ -81,8 +81,9 @@ float sample_rough_mean_3d(const T *data, size_t r1, size_t r2, size_t r3, size_
 
 template <typename T>
 ALWAYS_INLINE T lorenzo_predict_3d(const T *data_pos, size_t dim0_offset, size_t dim1_offset) {
-    return data_pos[-1] + data_pos[-dim1_offset] + data_pos[-dim0_offset] - data_pos[-dim1_offset - 1] -
-           data_pos[-dim0_offset - 1] - data_pos[-dim0_offset - dim1_offset] + data_pos[-dim0_offset - dim1_offset - 1];
+    return *(data_pos - 1) + *(data_pos - dim1_offset) + *(data_pos - dim0_offset) - *(data_pos - (dim1_offset + 1)) -
+           *(data_pos - (dim0_offset + 1)) - *(data_pos - (dim0_offset + dim1_offset)) +
+           *(data_pos - (dim0_offset + dim1_offset + 1));
 }
 
 template <typename T>
@@ -123,7 +124,7 @@ int optimize_quant_invl_3d(const T *data, size_t r1, size_t r2, size_t r3, doubl
             freq_index = static_cast<ptrdiff_t>(mean_diff / precision) - 1 + radius;
         if (freq_index <= 0) {
             freq_intervals[0]++;
-        } else if (freq_index >= freq_intervals.size()) {
+        } else if (freq_index >= static_cast<ptrdiff_t>(freq_intervals.size())) {
             freq_intervals[freq_intervals.size() - 1]++;
         } else {
             freq_intervals[freq_index]++;

@@ -8,9 +8,7 @@
 #include "SZ3/utils/ByteUtil.hpp"
 #include "SZ3/utils/MemoryUtil.hpp"
 #include "SZ3/utils/Timer.hpp"
-#if INTPTR_MAX == INT64_MAX  // 64bit system
-#include "SZ3/utils/ska_hash/unordered_map.hpp"
-#endif  // INTPTR_MAX == INT64_MAX
+#include "SZ3/utils/Collections.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -18,7 +16,6 @@
 #include <iostream>
 #include <map>
 #include <set>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace SZ3 {
@@ -102,7 +99,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
             throw std::invalid_argument("Huffman bins should not be empty");
         }
         init(bins, num_bin);
-        for (int i = 0; i < huffmanTree->stateNum; i++)
+        for (unsigned int i = 0; i < huffmanTree->stateNum; i++)
             if (huffmanTree->code[i]) nodeCount++;
         nodeCount = nodeCount * 2 - 1;
     }
@@ -520,11 +517,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
         T max = s[0];
         offset = s[0];  // offset is min
 
-#if (SZ3_USE_SKA_HASH) && (INTPTR_MAX == INT64_MAX)  // use ska for 64bit system
-        ska::unordered_map<T, size_t> frequency;
-#else   // most likely 32bit system
-        std::unordered_map<T, size_t> frequency;
-#endif  // INTPTR_MAX == INT64_MAX
+        unordered_map<T, size_t> frequency;
 
         for (size_t i = 0; i < length; i++) {
             frequency[s[i]] += 1;
@@ -548,7 +541,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
         for (const auto &kv : frequency) {
             frequencyList[kv.first - offset] = kv.second;
         }
-        for (size_t i = 0; i < stateNum; i++) {
+        for (int i = 0; i < stateNum; i++) {
             if (frequencyList[i] != 0) {
                 qinsert(new_node(frequencyList[i], i, nullptr, nullptr));
             }

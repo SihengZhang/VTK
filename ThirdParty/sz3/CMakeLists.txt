@@ -7,9 +7,9 @@ vtk_module_third_party(
     SPDX_COPYRIGHT_TEXT
       "Copyright (c) 2016, UChicago Argonne, LLC"
     SPDX_DOWNLOAD_LOCATION
-      "git+https://github.com/szcompressor/SZ3.git@3.3.2"
+      "git+https://github.com/szcompressor/SZ3.git@4359047ad03abcbce88a0def45d40d0f3a9c1863"
     VERSION
-      "3.3.2"
+      "3.3.2-6-g4359047"
     STANDARD_INCLUDE_DIRS
     HEADER_ONLY
   EXTERNAL
