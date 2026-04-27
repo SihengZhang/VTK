@@ -1,15 +1,15 @@
-#ifndef SZ3_HUFFMAN_ENCODER_HPP
-#define SZ3_HUFFMAN_ENCODER_HPP
+#ifndef SZ3_V330_HUFFMAN_ENCODER_HPP
+#define SZ3_V330_HUFFMAN_ENCODER_HPP
 
 #include <cstdint>
 
-#include "SZ3/def.hpp"
-#include "SZ3/encoder/Encoder.hpp"
-#include "SZ3/utils/ByteUtil.hpp"
-#include "SZ3/utils/MemoryUtil.hpp"
-#include "SZ3/utils/Timer.hpp"
+#include "SZ3_v330/def.hpp"
+#include "SZ3_v330/encoder/Encoder.hpp"
+#include "SZ3_v330/utils/ByteUtil.hpp"
+#include "SZ3_v330/utils/MemoryUtil.hpp"
+#include "SZ3_v330/utils/Timer.hpp"
 #if INTPTR_MAX == INT64_MAX  // 64bit system
-#include "SZ3/utils/ska_hash/unordered_map.hpp"
+#include "SZ3_v330/utils/ska_hash/unordered_map.hpp"
 #endif  // INTPTR_MAX == INT64_MAX
 #include <cassert>
 #include <cstdio>
@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace SZ3 {
+namespace SZ3_v330 {
 
 template <class T>
 class HuffmanEncoder : public concepts::EncoderInterface<T> {
@@ -102,7 +102,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
             throw std::invalid_argument("Huffman bins should not be empty");
         }
         init(bins, num_bin);
-        for (unsigned int i = 0; i < huffmanTree->stateNum; i++)
+        for (int i = 0; i < huffmanTree->stateNum; i++)
             if (huffmanTree->code[i]) nodeCount++;
         nodeCount = nodeCount * 2 - 1;
     }
@@ -521,7 +521,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
         offset = s[0];  // offset is min
 
 #if (SZ3_USE_SKA_HASH) && (INTPTR_MAX == INT64_MAX)  // use ska for 64bit system
-        ska::unordered_map<T, size_t> frequency;
+        ska_v330::unordered_map<T, size_t> frequency;
 #else   // most likely 32bit system
         std::unordered_map<T, size_t> frequency;
 #endif  // INTPTR_MAX == INT64_MAX
@@ -548,7 +548,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
         for (const auto &kv : frequency) {
             frequencyList[kv.first - offset] = kv.second;
         }
-        for (int i = 0; i < stateNum; i++) {
+        for (size_t i = 0; i < stateNum; i++) {
             if (frequencyList[i] != 0) {
                 qinsert(new_node(frequencyList[i], i, nullptr, nullptr));
             }
@@ -653,6 +653,6 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
         }
     }
 };
-}  // namespace SZ3
+}  // namespace SZ3_v330
 
 #endif

@@ -2056,12 +2056,12 @@ void vtkNek5000Reader::readCompressedData(char* dfName)
 
         if (isCompressed == 1)
         {
-          SZ3::Config conf;
           float* decData = nullptr;
+          SZ3::Config conf;
 
           try
           {
-            SZ_decompress<float>(conf, compressedBlob.data(), blobLength, decData);
+            vtk_sz3::SZ_decompress_compat<float>(compressedBlob.data(), blobLength, decData, conf);
             if (decData != nullptr)
             {
               size_t copyCount = std::min(static_cast<size_t>(pointsForRank),
@@ -2281,12 +2281,12 @@ void vtkNek5000Reader::readCompressedMesh(std::ifstream& dfPtr)
 
       if (isCompressed == 1)
       {
-        SZ3::Config conf;
         float* decData = nullptr;
+        SZ3::Config conf;
 
         try
         {
-          SZ_decompress<float>(conf, compressedBlob.data(), blobLength, decData);
+          vtk_sz3::SZ_decompress_compat<float>(compressedBlob.data(), blobLength, decData, conf);
           if (decData != nullptr)
           {
             size_t copyCount = std::min(static_cast<size_t>(pointsForRank),

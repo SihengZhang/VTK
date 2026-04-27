@@ -1,9 +1,9 @@
-#ifndef SZ3_LORENZO_PREDICTOR_HPP
-#define SZ3_LORENZO_PREDICTOR_HPP
+#ifndef SZ3_V330_LORENZO_PREDICTOR_HPP
+#define SZ3_V330_LORENZO_PREDICTOR_HPP
 
-#include "SZ3/predictor/Predictor.hpp"
+#include "SZ3_v330/predictor/Predictor.hpp"
 
-namespace SZ3 {
+namespace SZ3_v330 {
 
 // N-dimension L-layer lorenzo predictor
 template <class T, uint N, uint L>
@@ -107,5 +107,5 @@ class LorenzoPredictor : public concepts::PredictorInterface<T, N> {
         return d[-t * ds[2] - k * ds[1] - j * ds[0] - i];
     }
 };
-}  // namespace SZ3
+}  // namespace SZ3_v330
 #endif

@@ -7,9 +7,14 @@
 #cmakedefine01 VTK_MODULE_USE_EXTERNAL_vtksz3
 
 #if VTK_MODULE_USE_EXTERNAL_vtksz3
+// External SZ3 - single version support only
 # include <SZ3/api/sz.hpp>
 #else
-# include <vtksz3/include/SZ3/api/sz.hpp>
+// VTK-internal SZ3 with dual-version (v3.3.0 + v3.3.2) support
+// Include the compatibility wrapper which provides version-dispatching API
+# include <sz3_compat.hpp>
+// Also include the direct v3.3.2 API for backwards compatibility
+# include <SZ3/api/sz.hpp>
 #endif
 
 #endif

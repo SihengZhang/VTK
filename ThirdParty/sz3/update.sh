@@ -8,7 +8,7 @@ readonly name="sz3"
 readonly ownership="SZ3 Upstream <kwrobot@kitware.com>"
 readonly subtree="ThirdParty/$name/vtk$name"
 readonly repo="https://github.com/szcompressor/SZ3.git"
-readonly tag="4359047ad03abcbce88a0def45d40d0f3a9c1863"
+readonly tag="v3.3.2"
 readonly paths="
 include/
 

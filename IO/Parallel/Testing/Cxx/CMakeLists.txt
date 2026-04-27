@@ -10,6 +10,8 @@ if (TARGET VTK::ParallelMPI)
     TestNek5000CompressedVsUncompressed.cxx,NO_VALID
     TestNek5000CompressedMultiTimestep.cxx,NO_VALID
     TestNek5000BothFormats.cxx,NO_VALID
+    RenderNek5000Compressed.cxx,NO_VALID
+    RenderNek5000Uncompressed.cxx,NO_VALID
     )
   vtk_test_cxx_executable(vtkIOParallelCxxTests-MPI tests)
 endif()

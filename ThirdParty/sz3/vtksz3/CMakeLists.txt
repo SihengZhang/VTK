@@ -2,17 +2,32 @@ if (FALSE)
 cmake_minimum_required(VERSION 3.18)
 endif ()
 
-set(SZ3_DATA_VERSION 3.3.0)
+# SZ3 v3.3.2 (current/default)
+set(SZ3_DATA_VERSION 3.3.2)
 set(PROJECT_NAME SZ3)
-set(PROJECT_VERSION 3.3.0)
+set(PROJECT_VERSION 3.3.2)
 set(PROJECT_VERSION_MAJOR 3)
 set(PROJECT_VERSION_MINOR 3)
-set(PROJECT_VERSION_PATCH 0)
+set(PROJECT_VERSION_PATCH 2)
 set(PROJECT_VERSION_TWEAK 0)
 
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/SZ3/version.hpp.in"
   "${CMAKE_CURRENT_BINARY_DIR}/include/SZ3/version.hpp"
+  @ONLY)
+
+# SZ3 v3.3.0 (legacy support via namespace mangling)
+set(SZ3_V330_PROJECT_NAME SZ3_v330)
+set(SZ3_V330_DATA_VERSION 3.3.0)
+set(SZ3_V330_VERSION 3.3.0)
+set(SZ3_V330_VERSION_MAJOR 3)
+set(SZ3_V330_VERSION_MINOR 3)
+set(SZ3_V330_VERSION_PATCH 0)
+set(SZ3_V330_VERSION_TWEAK 0)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/SZ3_v330/version.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/SZ3_v330/version.hpp"
   @ONLY)
 
 vtk_module_include(VTK::sz3

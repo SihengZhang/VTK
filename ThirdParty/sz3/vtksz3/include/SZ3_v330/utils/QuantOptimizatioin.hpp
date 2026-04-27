@@ -1,9 +1,9 @@
-#ifndef SZ3_optimize_quant_intervals_hpp
-#define SZ3_optimize_quant_intervals_hpp
+#ifndef SZ3_V330_optimize_quant_intervals_hpp
+#define SZ3_V330_optimize_quant_intervals_hpp
 
 #include <vector>
 
-namespace SZ3 {
+namespace SZ3_v330 {
 
 #define QuantIntvMeanCapacity 8192
 #define QuantIntvSampleDistance 100
@@ -123,7 +123,7 @@ int optimize_quant_invl_3d(const T *data, size_t r1, size_t r2, size_t r3, doubl
             freq_index = static_cast<ptrdiff_t>(mean_diff / precision) - 1 + radius;
         if (freq_index <= 0) {
             freq_intervals[0]++;
-        } else if (freq_index >= static_cast<ptrdiff_t>(freq_intervals.size())) {
+        } else if (freq_index >= freq_intervals.size()) {
             freq_intervals[freq_intervals.size() - 1]++;
         } else {
             freq_intervals[freq_index]++;
@@ -149,6 +149,6 @@ int optimize_quant_invl_3d(const T *data, size_t r1, size_t r2, size_t r3, doubl
     mean_freq = estimate_mean_freq_and_position(freq_intervals, precision, sample_count, mean_guess);
     return estimate_quantization_intervals(intervals, sample_count);
 }
-}  // namespace SZ3
+}  // namespace SZ3_v330
 
 #endif
