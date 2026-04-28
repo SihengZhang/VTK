@@ -211,9 +211,14 @@ vtkNek5000Reader::~vtkNek5000Reader()
 
   if (this->dataArray)
   {
+    for (int i = 0; i < this->num_vars; i++)
+    {
+      delete[] this->dataArray[i];
+    }
     delete[] this->dataArray;
     this->dataArray = nullptr;
   }
+  delete[] this->meshCoords;
   if (this->num_vars > 0)
   {
     for (auto i = 0; i < this->num_vars; i++)
@@ -1753,6 +1758,7 @@ void vtkNek5000Reader::copyContinuumPoints(vtkPoints* points)
     }
   }
   delete[] this->meshCoords;
+  this->meshCoords = nullptr;
 }
 
 void vtkNek5000Reader::copyContinuumData(vtkUnstructuredGrid* pv_ugrid)
@@ -1787,6 +1793,7 @@ void vtkNek5000Reader::copyContinuumData(vtkUnstructuredGrid* pv_ugrid)
         scalars->SetName(this->var_names[v_index]);
         scalars->SetArray(
           this->dataArray[v_index], num_verts, 0, vtkDataArray::VTK_DATA_ARRAY_DELETE);
+        this->dataArray[v_index] = nullptr;
         /*
         for (int b_index = 0; b_index < this->myNumBlocks; ++b_index)
         {
@@ -1832,6 +1839,7 @@ void vtkNek5000Reader::copyContinuumData(vtkUnstructuredGrid* pv_ugrid)
         this->UGrid->GetPointData()->AddArray(vectors);
         vectors->Delete();
         delete[] this->dataArray[v_index];
+        this->dataArray[v_index] = nullptr;
       }
       //
       // std::cerr << __LINE__ << " deleting this->dataArray[" << v_index << "]\n";
@@ -2072,6 +2080,7 @@ void vtkNek5000Reader::readCompressedData(char* dfName)
           }
           catch (const std::exception& e)
           {
+            delete[] decData;
             std::cerr << "SZ3 error field " << fieldIdx << " wr " << wr << ": " << e.what() << std::endl;
           }
         }
@@ -2297,6 +2306,7 @@ void vtkNek5000Reader::readCompressedMesh(std::ifstream& dfPtr)
         }
         catch (const std::exception& e)
         {
+          delete[] decData;
           std::cerr << "SZ3 decompression error for coord " << coordIdx
                     << " writerRank " << wr << ": " << e.what() << std::endl;
         }
